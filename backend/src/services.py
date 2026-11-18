@@ -23,6 +23,8 @@ def commit_capacity(s,eid):
     if e.status!='requested': raise HTTPException(409,'只有已申请机时的估价可承诺')
     floor=round(e.predicted_hours*e.rate*1.15,2)
     if e.quote_amount<floor: raise HTTPException(409,f'报价低于成本底线 {floor:.2f} 元，请修订报价后重新申请')
+    # Lock the slot after the estimate row, matching the order used by machine
+    # switch approvals, so concurrent commit/switch transactions cannot deadlock.
     slot=s.query(MachineSlot).filter_by(id=e.slot_id).with_for_update().one()
     if e.predicted_hours>slot.capacity_hours-slot.reserved_hours+1e-6: raise HTTPException(409,'机时已被其他承诺占用，不能超售')
     slot.reserved_hours=round(slot.reserved_hours+e.predicted_hours,2)

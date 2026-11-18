@@ -9,3 +9,4 @@ export const MAINTENANCE_STATES={planned:'待批准保养',approved:'停机已�
 export const RESIN_STATES={available:'批次可用',quarantine:'批次隔离'};
 export const MATERIAL_STATES={issued:'已领料',returned:'已登记退料'};
 export const DELIVERY_STATES={dispatched:'已发样待签收',received:'客户已签收',accepted:'客户接受',rectification:'需整改重试',closed:'主管已关闭'};
+export const SWITCH_STATES={pending:'待评估',rejected:'拒绝推荐',eligible:'可换机',switched:'已换机'};

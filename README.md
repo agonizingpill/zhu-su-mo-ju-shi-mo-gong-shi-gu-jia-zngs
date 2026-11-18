@@ -18,6 +18,9 @@
 - 试模材料领耗：主管树脂批次入库，树脂状态available/quarantine；运行实绩按批次一次领料，锁库存，冻结单价；完工且未建结算可一次退余料，最多退领量。净耗成本=Σ((领kg−退kg)×单价快照)。所有新结算按台账取成本，拒绝任意覆盖；结算建立后领退料冻结。已signed历史数值保持，不补写旧凭据。
 - 客户交付验收：只从signed结算交样，样件数≤实绩good_shots；发样→客户签收→接受或整改→主管关闭。整改必须绑定原完工之后新一次同模具signed实绩，旧实绩或其他模具不能替代；重复签收/关闭拒绝。这里只留本地交接和客户意见，不发送外部消息。
 
+- 已承诺未开工换机评估：大机台完工快可能只是分到的模具简单，因此只用已签结实绩（signed结算）学习机台选择倾向。工艺四特征（模腔、滑块、重量、钢材）标准化后按归一化欧氏距离 ≤ 2.0 圈定可比样本，OLS 回归 `实际工时 = 工艺特征 + 机台固定效应`，机台效应即扣除模具复杂度后的真实机台差异；总样本 <5、任一相关机台可比样本 <2、或换机节时 90% t 区间下界 ≤ 0 均拒绝推荐，缺可比样本绝不编造。原估价回归工时、费率与报价始终保留不改。评估时冻结原承诺快照（机台、时段、已承诺工时、报价），评估/重跑只读快照；中断可续跑，重试在原申请行上重算、不新增申请（估单唯一约束）。主管批准时按目标机台工时 90% 区间上界做保守预留，报价不变且仍须高于原底价（预测工时×费率×1.15）；旧机时释放与新机时占用在同一事务、按 slot id 顺序加锁同时生效，余量不足、报价破底、估单已开工或原承诺变化时全部回滚并保留原承诺。换机与开工或其他机时承诺并发时，已开工估单保留原机台、不超售。页面按待评估、拒绝、可换机、已换机四组呈现，并展示机台效应、标准化系数、可比样本清单与节时区间等依据。
+
+
 ## 快速启动
 
 ```sh
@@ -61,6 +64,9 @@ Redis worker结果持久化 Estimate.model_result，同时写 backend/worker 共
 
 V3范围：保养时间和客户签收可按演示日期录入，无设备时钟联锁；同模具仅允许一份running实绩。每次试模对同树脂批次只领一次，不提供追加领料或多次退料；批次隔离后的退回库存仍保持隔离。客户样件数按good_shots上界，不另展开一射多腔件数。没有仓库外接、实际物流发送、客户门户或电子签章。
 
+换机评估范围：学习池仅含已签结实绩，draft/running/completed 实绩不入模；机台固定效应来自可比样本子集而非全部160条基准记录，基准表不被暗改。节时区间是回归系数的90% t 置信区间（正态近似兜底），不是预测区间，小样本下保守预留取目标机台条件均值区间上界。换机只迁移机时预留与估单 slot 指向，不改 `Estimate.predicted_hours`、报价与费率；历史 TrialExecution 快照中的 slot_id 也不改写。没有跨机台工艺路线约束、自动换机建议或机台健康联动；同机台不同时段不算换机。
+
+
 ## 本地开发与结构
 
 |层|实现|
@@ -76,11 +82,13 @@ V3 `backend/src/workshop_models.py`定义MaintenanceWindow、ResinLot、TrialMat
 
 `backend/src/execution_models.py` 定义实绩/结算外键与唯一约束，`execution_schemas.py` 校验输入，`execution_service.py` 管理快照、工时与成本事务，`execution_routes.py` 暴露 `/executions`、`/cost-reviews` 及 finish/sign 操作。
 
-`frontend/src/pages/` 的 moulds/estimates/evidence/schedule/executions/reviews 及 maintenance/materials/deliveries 是九页；`api.js` HTTP；`store.js` 业务状态；`components/common.js` 状态标签/证据条/选择器跨页复用；`utils/format.js` 转义、金额/数字和表单工具。
+换机评估由 `backend/src/switch_models.py`（MachineSwitchRequest，含原承诺冻结快照与学习结果列，估单唯一约束）、`switch_learn.py`（签结样本圈定、工艺特征+机台固定效应 OLS、90% t 区间）、`switch_service.py`（幂等评估/重跑、底价核对、主管批准的原子预留迁移）、`switch_schemas.py`、`switch_routes.py`（`/machine-switches` 及 `/approve`）组成；新表 create_all 非破坏性建立，旧表列无改动。
+
+`frontend/src/pages/` 的 moulds/estimates/evidence/schedule/executions/reviews 及 maintenance/materials/deliveries/switches 是十页；`api.js` HTTP；`store.js` 业务状态；`components/common.js` 状态标签/证据条/选择器跨页复用；`utils/format.js` 转义、金额/数字和表单工具。
 
 本地 `pip install -r backend/requirements.txt`，设置 DATABASE_URL/REDIS_URL，在backend目录 `uvicorn src.main:app --reload`，另一终端 `python -m src.worker`。前端建议使用Compose Nginx代理。
 
-枚举位置：角色、估价状态、实绩状态、结算、保养、树脂、领料、交付状态与钢材定义在 `backend/src/constants.py` 和 `frontend/src/constants.js`；`GET /enums` 返回上述九组。钢材输入Literal在schemas.py、模型编码在ml.py。后端权限为真实约束，前端禁用按钮作提示。IntegrityError转成可恢复409。
+枚举位置：角色、估价状态、实绩状态、结算、保养、树脂、领料、交付、换机状态与钢材定义在 `backend/src/constants.py` 和 `frontend/src/constants.js`；`GET /enums` 返回上述十组。钢材输入Literal在schemas.py、模型编码在ml.py。后端权限为真实约束，前端禁用按钮作提示。IntegrityError转成可恢复409。
 
 环境变量见 `.env.example`：COMPOSE_PROJECT_NAME、FRONTEND_PORT、BACKEND_PORT、DB_PORT、JWT_SECRET、SEED_DEMO。`COMPOSE_SUBNET=10.221.23.0/24` 是本机默认地址池已满后的专用网段；冲突时改空闲网段。数据库、Redis、计算产物为命名卷。
 
