@@ -1,0 +1,4 @@
+import {api} from './api.js';
+export const store={user:null,moulds:[],estimates:[],slots:[],selected:null,executions:[],reviews:[],executionSelected:null,reviewSelected:null,maintenance:[],resin:[],materials:[],deliveries:[],maintenanceSelected:null,materialSelected:null,deliverySelected:null};
+export async function refresh(){[store.moulds,store.estimates,store.slots,store.executions,store.reviews,store.maintenance,store.resin,store.materials,store.deliveries]=await Promise.all([api('/moulds'),api('/estimates'),api('/slots'),api('/executions'),api('/cost-reviews'),api('/maintenance-windows'),api('/resin-lots'),api('/trial-materials'),api('/trial-deliveries')]);if(!store.selected&&store.estimates.length)store.selected=store.estimates[0].id;return store}
+export const selected=()=>store.estimates.find(e=>e.id===Number(store.selected));
